@@ -1,4 +1,4 @@
-# app.py
+# app.py  —  p-based Syntetos & Boylan app (fixed plot)
 import io
 import math
 from typing import Tuple
@@ -8,45 +8,41 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import streamlit as st
 
-# --------------------------------------------------
-# Defaults
-# --------------------------------------------------
+# ---------------------- Defaults ----------------------
 ADI_CUTOFF_DEFAULT = 1.32
+P_CUTOFF_DEFAULT = round(1 / ADI_CUTOFF_DEFAULT, 6)   # ≈ 0.757576
 CV2_CUTOFF_DEFAULT = 0.49
 
-st.set_page_config(page_title="Demand Classification — Syntetos & Boylan", layout="wide")
+st.set_page_config(page_title="Demand Classification — p & CV²", layout="wide")
 
-# --------------------------------------------------
-# Helpers
-# --------------------------------------------------
-def classify_demand(adi: float, cv2: float, adi_cut: float, cv2_cut: float):
-    """Return (Category, Suggested) using Syntetos & Boylan quadrants."""
-    if pd.isna(cv2) or pd.isna(adi):
+# ---------------------- Helpers -----------------------
+def classify_by_p(p: float, cv2: float, p_cut: float, cv2_cut: float):
+    """Syntetos & Boylan quadrants expressed in p (share of non-zero periods)."""
+    if pd.isna(p) or pd.isna(cv2):
         return "Insufficient data", ""
-    if math.isinf(adi) or adi == 0:
+    if p <= 0:
         return "No demand", ""
-    if adi <= adi_cut and cv2 <= cv2_cut:
+    if p >= p_cut and cv2 <= cv2_cut:
         return "Smooth", "SES"
-    if adi <= adi_cut and cv2 > cv2_cut:
+    if p >= p_cut and cv2 > cv2_cut:
         return "Erratic", "SES"
-    if adi > adi_cut and cv2 <= cv2_cut:
+    if p < p_cut and cv2 <= cv2_cut:
         return "Intermittent", "Croston / SBA"
     return "Lumpy", "SBA"
 
 
 def compute_all(
-    df: pd.DataFrame, adi_cut: float, cv2_cut: float
+    df: pd.DataFrame, p_cut: float, cv2_cut: float
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     df: first column = product, remaining columns = dates (headers) with numeric quantities.
-    Returns: combined_df, stats_df, counts_df, class_df (with both CV² variants & categories)
+    Returns: combined_df, stats_df, counts_df, class_df (with both CV² variants & p classification)
     """
     # Parse date headers
     date_cols = list(df.columns[1:])
     parsed_dates = pd.to_datetime(date_cols, errors="coerce")
     n_periods = int(parsed_dates.notna().sum()) or len(date_cols)
 
-    # Build Combined & collect per-product values
     combined_rows = []
     per_product_values = {}
     max_len = 0
@@ -61,7 +57,7 @@ def compute_all(
         arr_dates = parsed_dates[nz]
         if vals and arr_dates.notna().all():
             inter = pd.Series(arr_dates).diff().dropna().dt.days.tolist()
-            inter_arrivals = [1] + inter
+            inter_arrivals = [1] + inter    # first interval convention
         else:
             inter_arrivals = []
 
@@ -69,7 +65,7 @@ def compute_all(
         combined_rows.append((product, vals, inter_arrivals))
         per_product_values[product] = vals
 
-    # Combined table (two rows per product)
+    # Combined table
     final_rows = []
     for product, pv, ia in combined_rows:
         pv = list(pv) + [""] * (max_len - len(pv))
@@ -78,16 +74,16 @@ def compute_all(
         final_rows.append(["", "frequence"] + ia)
     combined_df = pd.DataFrame(final_rows, columns=["Product", "Type"] + list(range(max_len)))
 
-    # --- Summary 1 (stats) with BOTH CV² definitions
+    # Summary 1 (stats) — include BOTH CV² definitions
     stats_rows = []
     for product, vals in per_product_values.items():
         if vals:
             s = pd.Series(vals, dtype="float64")
             mean = s.mean()
-            std = s.std(ddof=1)  # sample std (Excel STDEV.S)
+            std = s.std(ddof=1)            # sample std (Excel STDEV.S)
             ssum = s.sum()
-            cv2_sb = (std / mean) ** 2 if mean != 0 else np.nan        # S&B (recommended)
-            cv2_legacy = (std / ssum) ** 2 if ssum != 0 else np.nan     # Legacy (your sheet)
+            cv2_sb = (std / mean) ** 2 if mean != 0 else np.nan
+            cv2_legacy = (std / ssum) ** 2 if ssum != 0 else np.nan
         else:
             mean = std = ssum = cv2_sb = cv2_legacy = np.nan
         stats_rows.append([product, mean, std, ssum, cv2_sb, cv2_legacy])
@@ -97,31 +93,32 @@ def compute_all(
             stats_rows,
             columns=[
                 "Produit",
-                "moyenne_non_zero",   # TRUE mean of non-zero demands
+                "moyenne_non_zero",
                 "ecart-type",
-                "somme_non_zero",     # to mirror your earlier table
-                "CV^2_S&B",           # (σ/μ)^2  <-- used for S&B thresholds
-                "CV^2_legacy",        # (σ/Σx)^2 <-- what produced tiny values
+                "somme_non_zero",
+                "CV^2_S&B",
+                "CV^2_legacy",
             ],
         )
         .set_index("Produit")
         .sort_index()
     )
 
-    # --- Summary 2 (counts)
+    # Summary 2 (counts)
     counts_rows = []
     for product, vals in per_product_values.items():
         n_freq = len(vals)
-        P = (n_freq / n_periods) if n_periods else np.nan
-        counts_rows.append([product, n_periods, n_freq, P])
+        p = (n_freq / n_periods) if n_periods else np.nan
+        counts_rows.append([product, n_periods, n_freq, p])
     counts_df = (
-        pd.DataFrame(counts_rows, columns=["Produit", "N périodes", "N fréquence", "P"])
+        pd.DataFrame(counts_rows, columns=["Produit", "N périodes", "N fréquence", "p"])
         .set_index("Produit")
         .sort_index()
     )
 
-    # --- Classification dataframe
+    # Classification table (by p)
     class_df = stats_df.join(counts_df, how="outer")
+    # Also keep ADI for reference (not used in plotting)
     class_df["ADI"] = class_df.apply(
         lambda r: (r["N périodes"] / r["N fréquence"])
         if pd.notna(r["N fréquence"]) and r["N fréquence"] not in (0, None) and r["N fréquence"] != 0
@@ -129,22 +126,23 @@ def compute_all(
         axis=1,
     )
 
-    # Categories for BOTH CV² variants
-    res_sb = class_df.apply(lambda r: classify_demand(r["ADI"], r["CV^2_S&B"], adi_cut, cv2_cut), axis=1, result_type="expand")
-    class_df["Category_S&B"] = res_sb[0]
-    class_df["Suggested_S&B"] = res_sb[1]
+    res_sb = class_df.apply(lambda r: classify_by_p(r["p"], r["CV^2_S&B"], p_cut, cv2_cut),
+                            axis=1, result_type="expand")
+    class_df["Category_S&B_p"] = res_sb[0]
+    class_df["Suggested_S&B_p"] = res_sb[1]
 
-    res_legacy = class_df.apply(lambda r: classify_demand(r["ADI"], r["CV^2_legacy"], adi_cut, cv2_cut), axis=1, result_type="expand")
-    class_df["Category_Legacy"] = res_legacy[0]
-    class_df["Suggested_Legacy"] = res_legacy[1]
+    res_legacy = class_df.apply(lambda r: classify_by_p(r["p"], r["CV^2_legacy"], p_cut, cv2_cut),
+                                axis=1, result_type="expand")
+    class_df["Category_Legacy_p"] = res_legacy[0]
+    class_df["Suggested_Legacy_p"] = res_legacy[1]
 
     return combined_df, stats_df, counts_df, class_df
 
 
-def make_plot(class_df: pd.DataFrame, adi_cut: float, cv2_cut: float, cv2_col: str):
-    """Return Matplotlib figure for ADI vs chosen CV² column."""
+def make_plot_p(class_df: pd.DataFrame, p_cut: float, cv2_cut: float, cv2_col: str):
+    """Return Matplotlib figure for p (x) vs chosen CV² (y)."""
     fig, ax = plt.subplots(figsize=(8, 6))
-    x = class_df["ADI"].replace(np.inf, np.nan)
+    x = class_df["p"].clip(lower=0, upper=1)  # p is a share in [0,1]
     y = class_df[cv2_col]
 
     ax.scatter(x, y)
@@ -152,11 +150,15 @@ def make_plot(class_df: pd.DataFrame, adi_cut: float, cv2_cut: float, cv2_col: s
         if pd.notna(xi) and pd.notna(yi):
             ax.annotate(str(label), (xi, yi), textcoords="offset points", xytext=(5, 5))
 
-    ax.axvline(adi_cut, linestyle="--")
+    # Cutoff lines
+    ax.axvline(p_cut, linestyle="--")
     ax.axhline(cv2_cut, linestyle="--")
-    ax.set_xlabel("ADI (Average inter-demand interval)")
+
+    # Axis labels and limits
+    ax.set_xlabel("p (share of non-zero periods)")
+    ax.set_xlim(0, 1)  # IMPORTANT: keep p within [0,1]
     ax.set_ylabel(f"{cv2_col} value")
-    ax.set_title("Syntetos & Boylan Demand Classification")
+    ax.set_title("Syntetos & Boylan — p vs CV²")
     fig.tight_layout()
     return fig
 
@@ -169,7 +171,7 @@ def excel_bytes(
     selected_cols: Tuple[str, str],
     one_sheet: bool = True,
 ) -> io.BytesIO:
-    """Build an Excel in memory. selected_cols=(Category_selected, Suggested_selected)."""
+    """Build an Excel in memory with the 'selected' category front-and-center."""
     sel_cat_col, sel_sug_col = selected_cols
     export_class = class_df.copy()
     export_class.insert(0, "Category_Selected", export_class.pop(sel_cat_col))
@@ -198,23 +200,21 @@ def excel_bytes(
     buf.seek(0)
     return buf
 
-# --------------------------------------------------
-# UI
-# --------------------------------------------------
-st.title("Demand Classification — Syntetos & Boylan")
+# ---------------------- UI ---------------------------
+st.title("Demand Classification — **p** & CV² (Syntetos & Boylan)")
 
 with st.sidebar:
     st.header("Settings")
-    adi_cut = st.number_input("ADI cut-off", value=float(ADI_CUTOFF_DEFAULT), format="%.4f")
+    p_cut = st.number_input("p cut-off", value=float(P_CUTOFF_DEFAULT), format="%.6f")
     cv2_cut = st.number_input("CV² cut-off", value=float(CV2_CUTOFF_DEFAULT), format="%.4f")
     cv2_choice = st.radio(
-        "CV² definition for plot & 'selected' category",
+        "CV² definition",
         options=("S&B (σ/μ)^2 — recommended", "Legacy (σ/Σx)^2 — for comparison"),
         index=0,
     )
     cv2_col = "CV^2_S&B" if cv2_choice.startswith("S&B") else "CV^2_legacy"
-    cat_col = "Category_S&B" if cv2_col == "CV^2_S&B" else "Category_Legacy"
-    sug_col = "Suggested_S&B" if cv2_col == "CV^2_S&B" else "Suggested_Legacy"
+    cat_col = "Category_S&B_p" if cv2_col == "CV^2_S&B" else "Category_Legacy_p"
+    sug_col = "Suggested_S&B_p" if cv2_col == "CV^2_S&B" else "Suggested_Legacy_p"
     one_sheet = st.checkbox("Write everything on ONE sheet", value=True)
 
 uploaded = st.file_uploader("Upload your Excel file", type=["xlsx", "xls"])
@@ -225,7 +225,6 @@ if uploaded is not None:
         xls = pd.ExcelFile(uploaded)
         default = "classification"
         options = xls.sheet_names
-        # try to preselect "classification" if present (case-insensitive)
         idx = 0
         for i, s in enumerate(options):
             if s.lower() == default:
@@ -243,14 +242,14 @@ if uploaded is not None and sheet_name is not None:
         with st.expander("Preview input data"):
             st.dataframe(df_raw.head(20), use_container_width=True)
 
-        combined_df, stats_df, counts_df, class_df = compute_all(df_raw, adi_cut=adi_cut, cv2_cut=cv2_cut)
+        combined_df, stats_df, counts_df, class_df = compute_all(df_raw, p_cut=p_cut, cv2_cut=cv2_cut)
 
-        # Selected columns (based on CV2 choice)
+        # Show classification table (p-based)
         class_df["Category_Selected"] = class_df[cat_col]
         class_df["Suggested_Selected"] = class_df[sug_col]
 
-        st.subheader("Classification (includes both CV² versions)")
-        st.caption("Columns 'Category_Selected' and 'Suggested_Selected' reflect your CV² choice in the sidebar.")
+        st.subheader("Classification (p-based; includes both CV² versions)")
+        st.caption("Columns 'Category_Selected' / 'Suggested_Selected' reflect the CV² option you chose.")
         st.dataframe(class_df.reset_index(), use_container_width=True)
 
         c1, c2 = st.columns(2)
@@ -258,14 +257,14 @@ if uploaded is not None and sheet_name is not None:
             st.markdown("**Table 1 — Stats & CV²**")
             st.dataframe(stats_df.reset_index(), use_container_width=True)
         with c2:
-            st.markdown("**Table 2 — N périodes / N fréquence / P**")
+            st.markdown("**Table 2 — N périodes / N fréquence / p**")
             st.dataframe(counts_df.reset_index(), use_container_width=True)
 
         st.subheader("Combined table (taille / frequence)")
         st.dataframe(combined_df, use_container_width=True)
 
-        st.subheader(f"Syntetos & Boylan grid (ADI vs {cv2_col})")
-        fig = make_plot(class_df, adi_cut=adi_cut, cv2_cut=cv2_cut, cv2_col=cv2_col)
+        st.subheader(f"Syntetos & Boylan grid (p vs {cv2_col})")
+        fig = make_plot_p(class_df, p_cut=p_cut, cv2_cut=cv2_cut, cv2_col=cv2_col)
         st.pyplot(fig, use_container_width=True)
 
         # Downloads
@@ -285,15 +284,16 @@ if uploaded is not None and sheet_name is not None:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
+        # PNG of the current plot
         png_buf = io.BytesIO()
         fig.savefig(png_buf, format="png", bbox_inches="tight")
         png_buf.seek(0)
-        st.download_button("Download plot (PNG)", data=png_buf, file_name="classification_grid.png", mime="image/png")
+        st.download_button("Download plot (PNG)", data=png_buf, file_name="classification_grid_p.png", mime="image/png")
 
         st.caption(
-            "Notes: CV²_S&B uses mean of non-zero demands (recommended). "
-            "CV²_legacy uses sum of non-zero demands (for comparison). "
-            "ADI = N périodes / N fréquence (∞ if no demand)."
+            "Notes: p = N fréquence / N périodes ∈ [0,1]. "
+            "Default p_cut = 1/1.32 ≈ 0.7576. "
+            "CV²_S&B uses mean of non-zero demands; CV²_legacy uses sum (for comparison)."
         )
 
     except Exception as e:

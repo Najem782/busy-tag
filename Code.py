@@ -6,7 +6,6 @@ import os
 st.set_page_config(page_title="Restaurant Manager", layout="wide", page_icon="🍽️")
 
 st.title("🍽️ Restaurant Management Dashboard")
-st.markdown("Enter your daily metrics below. All differences, totals, and revenue update instantly.")
 st.markdown("---")
 
 # File paths for cloud persistence
@@ -17,18 +16,17 @@ CASH_FILE = "cash_store.csv"
 # --- INVENTORY TABLE SETUP ---
 INV_COLUMNS = ["rassyoun", "kbir", "sghiir", "hout"]
 
-# 10 exact rows structured sequentially based on your input loop
 INV_ROWS = [
     "Beyet (1)",
     "Achat",
     "Vente (1)",
     "Reste (1)",
-    "Différence (1)",  # Formula 1 goes here
+    "Différence (1)",  # Formula 1
     "Reste (2)",
     "Plus",
     "Vente (2)",
     "Beyet (2)",
-    "Différence (2)"   # Formula 2 goes here
+    "Différence (2)"   # Formula 2
 ]
 
 # --- EXPENSES SETUP ---
@@ -74,7 +72,7 @@ def save_cash_left(value):
     with open(CASH_FILE, "w") as f:
         f.write(str(value))
 
-# Initialize Session States safely
+# Initialize states safely
 if "left_table_data" not in st.session_state:
     st.session_state.left_table_data = load_expense_data()
 if "inventory_data" not in st.session_state:
@@ -84,55 +82,65 @@ if "cash_left" not in st.session_state:
 
 
 # ==========================================
-# SECTION 1: THE 10-ROW BALANCE LEDGER
+# SECTION 1: HSEEB DJEJ (Stock Balance Ledger)
 # ==========================================
-st.subheader("📊 Stock & Balance Tracker")
-st.caption("Fill in the fields. Row calculations update in real time.")
+st.subheader("📊 Hseeb Djej")
+st.caption("Enter inventory logs. The calculated difference rows are highlighted below.")
 
 working_inv_df = st.session_state.inventory_data.copy()
 
-# Lock the formulation rows so users can't accidentally type over them
+# Math execution loop with flipped formula signs
+for col in INV_COLUMNS:
+    try:
+        # Flipped Loop 1: Différence = Vente + Reste - Beyet - Achat
+        diff1 = (working_inv_df.at["Vente (1)", col] + 
+                 working_inv_df.at["Reste (1)", col] - 
+                 working_inv_df.at["Beyet (1)", col] - 
+                 working_inv_df.at["Achat", col])
+        working_inv_df.at["Différence (1)", col] = diff1
+        
+        # Flipped Loop 2: Différence = Vente + Beyet - Reste - Plus
+        diff2 = (working_inv_df.at["Vente (2)", col] + 
+                 working_inv_df.at["Beyet (2)", col] - 
+                 working_inv_df.at["Reste (2)", col] - 
+                 working_inv_df.at["Plus", col])
+        working_inv_df.at["Différence (2)", col] = diff2
+    except KeyError:
+        pass
+
+# Visual styling matrix for specific emphasis on calculated targets
+def highlight_differences(row):
+    if row.name in ["Différence (1)", "Différence (2)"]:
+        return ['background-color: #ffe0b2; font-weight: bold; color: #e65100; border: 2px solid #f57c00;'] * len(row)
+    return [''] * len(row)
+
+styled_inv_df = working_inv_df.style.apply(highlight_differences, axis=1)
+
+# Render editable grid
 edited_inv_df = st.data_editor(
-    working_inv_df,
+    styled_inv_df,
     use_container_width=True,
     disabled=["Différence (1)", "Différence (2)"],
     key="inventory_editor"
 )
 
-# Run math calculations over the 4 custom columns
-for col in INV_COLUMNS:
-    try:
-        # Loop 1 Math: Différence = Beyet + Achat - Vente - Reste
-        diff1 = (edited_inv_df.at["Beyet (1)", col] + 
-                 edited_inv_df.at["Achat", col] - 
-                 edited_inv_df.at["Vente (1)", col] - 
-                 edited_inv_df.at["Reste (1)", col])
-        edited_inv_df.at["Différence (1)", col] = diff1
-        
-        # Loop 2 Math: Différence = Reste + Plus - Vente - Beyet
-        diff2 = (edited_inv_df.at["Reste (2)", col] + 
-                 edited_inv_df.at["Plus", col] - 
-                 edited_inv_df.at["Vente (2)", col] - 
-                 edited_inv_df.at["Beyet (2)", col])
-        edited_inv_df.at["Différence (2)", col] = diff2
-    except KeyError:
-        pass
+# Convert styled back to pure df for validation checks
+clean_edited_inv = pd.DataFrame(edited_inv_df.data, index=INV_ROWS, columns=INV_COLUMNS)
 
-# Force saving and rerun if states alter
-if not edited_inv_df.equals(st.session_state.inventory_data):
-    st.session_state.inventory_data = edited_inv_df
-    save_csv(edited_inv_df, INVENTORY_FILE)
+if not clean_edited_inv.equals(st.session_state.inventory_data):
+    st.session_state.inventory_data = clean_edited_inv
+    save_csv(clean_edited_inv, INVENTORY_FILE)
     st.rerun()
 
 st.markdown("---")
 
 # ==========================================
-# SECTION 2: OPERATIONS & EXPENSES
+# SECTION 2: CHARGE & FLOUSS
 # ==========================================
 col_left, col_right = st.columns(2)
 
 with col_left:
-    st.subheader("📋 Core Tracked Expenses")
+    st.subheader("📋 Charge")
     st.caption("Modify amounts directly in the grid cell rows.")
     
     edited_left_df = st.data_editor(
@@ -153,7 +161,7 @@ with col_left:
         f"""
         <div style="background-color: #f0f2f6; padding: 12px; border-radius: 6px; border-left: 5px solid #ff4b4b; margin-top: 10px;">
             <h4 style="margin: 0; color: #31333F; display: flex; justify-content: space-between;">
-                <span>Total Expenses:</span>
+                <span>Total Charge:</span>
                 <span>{total_expenses:,.3f} DT</span>
             </h4>
         </div>
@@ -162,40 +170,34 @@ with col_left:
     )
 
 with col_right:
-    st.subheader("💰 Revenue & Cash Tracking (Recette)")
-    st.caption("Log your remaining cash below to calculate total daily revenue.")
+    st.subheader("💰 Flouss")
+    st.caption("Input the remaining physical cash stack to evaluate total daily intake values.")
     
-    # Static operational metric from previous update
-    st.metric(label="Other Operations Fixed Total", value="60.000 DT")
-    
-    # Input field for Money Left / Argent Restant
     cash_left_input = st.number_input(
-        "Argent Restant (Money Left in Register):", 
+        "Flouss (Money Left):", 
         min_value=0.0, 
         value=st.session_state.cash_left, 
         step=5.0, 
         format="%.3f"
     )
     
-    # If the user edits the input box, save it to session state and disk
     if cash_left_input != st.session_state.cash_left:
         st.session_state.cash_left = cash_left_input
         save_cash_left(cash_left_input)
         st.rerun()
     
-    # Calculate Total Revenue (Recette Totale)
-    # Recette = Expenses + Cash Left + 60 DT Fixed
-    total_revenue = total_expenses + cash_left_input + 60.0
+    # Recette = Total Charge + Flouss
+    total_revenue = total_expenses + cash_left_input
     
     st.markdown(
         f"""
         <div style="background-color: #e8f5e9; padding: 15px; border-radius: 6px; border-left: 5px solid #2e7d32; margin-top: 25px;">
             <h3 style="margin: 0; color: #1b5e20; display: flex; justify-content: space-between;">
-                <span>Recette Totale (Whole Revenue):</span>
+                <span>Recette Totale:</span>
                 <span>{total_revenue:,.3f} DT</span>
             </h3>
             <p style="margin: 5px 0 0 0; font-size: 13px; color: #2e7d32; font-style: italic;">
-                Calculation: Total Expenses ({total_expenses:,.3f}) + Argent Restant ({cash_left_input:,.3f}) + Fixed Ops (60.000)
+                Calculation: Total Charge ({total_expenses:,.3f}) + Flouss ({cash_left_input:,.3f})
             </p>
         </div>
         """, 

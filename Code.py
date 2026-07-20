@@ -14,7 +14,8 @@ EXPENSE_FILE = "expense_store.csv"
 INVENTORY_FILE = "inventory_store.csv"
 
 # --- INVENTORY TABLE SETUP ---
-INV_COLUMNS = ["rassyoun", "kbir", "sghiir", "hout", "Blank Column"]
+# Removed the blank column from this list
+INV_COLUMNS = ["rassyoun", "kbir", "sghiir", "hout"]
 
 # 10 exact rows structured sequentially based on your input loop
 INV_ROWS = [
@@ -50,8 +51,9 @@ def load_inventory_data():
     if os.path.exists(INVENTORY_FILE):
         try:
             df = pd.read_csv(INVENTORY_FILE, index_col=0)
+            # Filter columns to ensure it strictly matches the 4 non-blank columns
             if len(df) == len(INV_ROWS):
-                return df
+                return df.reindex(columns=INV_COLUMNS, fill_value=0.0)
         except: pass
     return pd.DataFrame(0.0, index=INV_ROWS, columns=INV_COLUMNS)
 
@@ -81,7 +83,7 @@ edited_inv_df = st.data_editor(
     key="inventory_editor"
 )
 
-# Run math calculations over the 5 custom columns
+# Run math calculations over the 4 custom columns
 for col in INV_COLUMNS:
     try:
         # Loop 1 Math: Différence = Beyet + Achat - Vente - Reste

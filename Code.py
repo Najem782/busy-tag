@@ -6,12 +6,13 @@ import os
 st.set_page_config(page_title="Restaurant Manager", layout="wide", page_icon="🍽️")
 
 st.title("🍽️ Restaurant Management Dashboard")
-st.markdown("Enter your daily metrics below. All differences and totals update instantly.")
+st.markdown("Enter your daily metrics below. All differences, totals, and revenue update instantly.")
 st.markdown("---")
 
 # File paths for cloud persistence
 EXPENSE_FILE = "expense_store.csv"
 INVENTORY_FILE = "inventory_store.csv"
+CASH_FILE = "cash_store.csv"
 
 # --- INVENTORY TABLE SETUP ---
 INV_COLUMNS = ["rassyoun", "kbir", "sghiir", "hout"]
@@ -31,7 +32,6 @@ INV_ROWS = [
 ]
 
 # --- EXPENSES SETUP ---
-# Added "tassliih" to the permanent list of tracked items
 FIXED_ITEMS = [
     "Frite", "Gazouz", "Fham", "Khobz", "Aymen", 
     "Attar", "Khadema", "Khodhra", "mazraa", "karim", "tassliih"
@@ -42,9 +42,7 @@ def load_expense_data():
     if os.path.exists(EXPENSE_FILE):
         try:
             df = pd.read_csv(EXPENSE_FILE)
-            # Check if all FIXED_ITEMS are present; if not, re-align
             if "Expense Item" in df.columns and "Amount" in df.columns:
-                # Merge to keep old values while adding new fixed rows safely
                 default_df = pd.DataFrame({"Expense Item": FIXED_ITEMS, "Amount": [0.0] * len(FIXED_ITEMS)})
                 merged = pd.merge(default_df, df, on="Expense Item", how="left", suffixes=("_def", ""))
                 merged["Amount"] = merged["Amount"].fillna(0.0)
@@ -61,14 +59,28 @@ def load_inventory_data():
         except: pass
     return pd.DataFrame(0.0, index=INV_ROWS, columns=INV_COLUMNS)
 
+def load_cash_left():
+    if os.path.exists(CASH_FILE):
+        try:
+            with open(CASH_FILE, "r") as f:
+                return float(f.read().strip())
+        except: pass
+    return 0.0
+
 def save_csv(df, filepath):
     df.to_csv(filepath, index=True if "Expense Item" not in df.columns else False)
+
+def save_cash_left(value):
+    with open(CASH_FILE, "w") as f:
+        f.write(str(value))
 
 # Initialize Session States safely
 if "left_table_data" not in st.session_state:
     st.session_state.left_table_data = load_expense_data()
 if "inventory_data" not in st.session_state:
     st.session_state.inventory_data = load_inventory_data()
+if "cash_left" not in st.session_state:
+    st.session_state.cash_left = load_cash_left()
 
 
 # ==========================================
@@ -150,8 +162,42 @@ with col_left:
     )
 
 with col_right:
-    st.subheader("📝 Fixed External Operations")
-    st.caption("Standard operational allowance metrics.")
+    st.subheader("💰 Revenue & Cash Tracking (Recette)")
+    st.caption("Log your remaining cash below to calculate total daily revenue.")
     
-    # Simple static metric card display replacing the entire second table setup
-    st.metric(label="Other Operations Total", value="60.000 DT")
+    # Static operational metric from previous update
+    st.metric(label="Other Operations Fixed Total", value="60.000 DT")
+    
+    # Input field for Money Left / Argent Restant
+    cash_left_input = st.number_input(
+        "Argent Restant (Money Left in Register):", 
+        min_value=0.0, 
+        value=st.session_state.cash_left, 
+        step=5.0, 
+        format="%.3f"
+    )
+    
+    # If the user edits the input box, save it to session state and disk
+    if cash_left_input != st.session_state.cash_left:
+        st.session_state.cash_left = cash_left_input
+        save_cash_left(cash_left_input)
+        st.rerun()
+    
+    # Calculate Total Revenue (Recette Totale)
+    # Recette = Expenses + Cash Left + 60 DT Fixed
+    total_revenue = total_expenses + cash_left_input + 60.0
+    
+    st.markdown(
+        f"""
+        <div style="background-color: #e8f5e9; padding: 15px; border-radius: 6px; border-left: 5px solid #2e7d32; margin-top: 25px;">
+            <h3 style="margin: 0; color: #1b5e20; display: flex; justify-content: space-between;">
+                <span>Recette Totale (Whole Revenue):</span>
+                <span>{total_revenue:,.3f} DT</span>
+            </h3>
+            <p style="margin: 5px 0 0 0; font-size: 13px; color: #2e7d32; font-style: italic;">
+                Calculation: Total Expenses ({total_expenses:,.3f}) + Argent Restant ({cash_left_input:,.3f}) + Fixed Ops (60.000)
+            </p>
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )

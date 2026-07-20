@@ -3,35 +3,40 @@ import pandas as pd
 import os
 
 # Set up page configuration
-st.set_page_config(page_title="Restaurant Expense Manager", layout="wide", page_icon="🍽️")
+st.set_page_config(page_title="Restaurant Manager", layout="wide", page_icon="🍽️")
 
-st.title("🍽️ Restaurant Expense Manager")
-st.markdown("Enter your daily operational figures. Calculations update automatically.")
+st.title("🍽️ Restaurant Management Dashboard")
+st.markdown("Enter your daily metrics below. All differences and totals update instantly.")
 st.markdown("---")
 
 # File paths for cloud persistence
 EXPENSE_FILE = "expense_store.csv"
 INVENTORY_FILE = "inventory_store.csv"
 
-# Core setups from previous configurations
+# --- INVENTORY TABLE SETUP ---
+INV_COLUMNS = ["rassyoun", "kbir", "sghiir", "hout", "Blank Column"]
+
+# 10 exact rows structured sequentially based on your input loop
+INV_ROWS = [
+    "Beyet (1)",
+    "Achat",
+    "Vente (1)",
+    "Reste (1)",
+    "Différence (1)",  # Formula 1 goes here
+    "Reste (2)",
+    "Plus",
+    "Vente (2)",
+    "Beyet (2)",
+    "Différence (2)"   # Formula 2 goes here
+]
+
+# --- EXPENSES SETUP ---
 FIXED_ITEMS = [
     "Frite", "Gazouz", "Fham", "Khobz", "Aymen", 
     "Attar", "Khadema", "Khodhra", "mazraa", "karim"
 ]
 
-# --- INVENTORY DATA CONFIGURATION ---
-# Columns: rassyoun, kbir, sghiir, hout, [blank] -> named "Other"
-INV_COLUMNS = ["rassyoun", "kbir", "sghiir", "hout", "Other"]
-# 11 Rows required by user
-INV_ROWS = [
-    "beyet", "achat", "vente", "reste", "différence",
-    "reste plus", "vente beyet", "difference"
-]
-# Fill out remaining rows up to 11 total with custom empty placeholders if needed
-while len(INV_ROWS) < 11:
-    INV_ROWS.append(f"Row {len(INV_ROWS) + 1}")
-
-# --- PERSISTENCE LAYER FUNCTIONS ---
+# --- PERSISTENCE LAYER ---
 def load_expense_data():
     if os.path.exists(EXPENSE_FILE):
         try:
@@ -45,10 +50,9 @@ def load_inventory_data():
     if os.path.exists(INVENTORY_FILE):
         try:
             df = pd.read_csv(INVENTORY_FILE, index_col=0)
-            if list(df.columns) == INV_COLUMNS and len(df) == 11:
+            if len(df) == len(INV_ROWS):
                 return df
         except: pass
-    # Default matrix with 11 rows and 5 columns initialized to 0.0
     return pd.DataFrame(0.0, index=INV_ROWS, columns=INV_COLUMNS)
 
 def save_csv(df, filepath):
@@ -62,45 +66,41 @@ if "inventory_data" not in st.session_state:
 
 
 # ==========================================
-# NEW SECTION: 5-COLUMN BY 11-ROW INVENTORY
+# SECTION 1: THE 10-ROW BALANCE LEDGER
 # ==========================================
-st.subheader("📊 Stock & Sales Balance Ledger")
-st.caption("Edit values directly in the grid. Rows labeled 'différence' and 'difference' calculate automatically.")
+st.subheader("📊 Stock & Balance Tracker")
+st.caption("Fill in the fields. Row calculations update in real time.")
 
-# Prepare dataframe for editing (make a copy to alter programmatically)
 working_inv_df = st.session_state.inventory_data.copy()
 
-# Render editable grid for inventory tracker
-# We disable the formula rows so users don't overwrite calculation paths manually
+# Lock the formulation rows so users can't accidentally type over them
 edited_inv_df = st.data_editor(
     working_inv_df,
     use_container_width=True,
-    disabled=["différence", "difference"], # Locks formula rows from manual overrides
+    disabled=["Différence (1)", "Différence (2)"],
     key="inventory_editor"
 )
 
-# Apply Formulas to the user data matrix dynamically across all 5 columns
+# Run math calculations over the 5 custom columns
 for col in INV_COLUMNS:
     try:
-        # First Half Formula: Différence = beyet + achat - vente - reste
-        diff1 = (edited_inv_df.at["beyet", col] + 
-                 edited_inv_df.at["achat", col] - 
-                 edited_inv_df.at["vente", col] - 
-                 edited_inv_df.at["reste", col])
-        edited_inv_df.at["différence", col] = diff1
+        # Loop 1 Math: Différence = Beyet + Achat - Vente - Reste
+        diff1 = (edited_inv_df.at["Beyet (1)", col] + 
+                 edited_inv_df.at["Achat", col] - 
+                 edited_inv_df.at["Vente (1)", col] - 
+                 edited_inv_df.at["Reste (1)", col])
+        edited_inv_df.at["Différence (1)", col] = diff1
         
-        # Second Half Formula: Difference = reste plus - vente beyet (Interpreted cleanly from user metrics)
-        # Formula: Difference = (reste + plus) - vente - beyet
-        # Maps "reste plus" cell + "Row 7" (vente beyet item indicators) to handle the equation
-        r_plus = edited_inv_df.at["reste plus", col]
-        v_beyet = edited_inv_df.at["vente beyet", col]
-        
-        diff2 = r_plus - v_beyet - edited_inv_df.at["vente", col] - edited_inv_df.at["beyet", col]
-        edited_inv_df.at["difference", col] = diff2
+        # Loop 2 Math: Différence = Reste + Plus - Vente - Beyet
+        diff2 = (edited_inv_df.at["Reste (2)", col] + 
+                 edited_inv_df.at["Plus", col] - 
+                 edited_inv_df.at["Vente (2)", col] - 
+                 edited_inv_df.at["Beyet (2)", col])
+        edited_inv_df.at["Différence (2)", col] = diff2
     except KeyError:
-        pass # Catch safety triggers if tracking items skew row labels
+        pass
 
-# Save Inventory Changes if edits exist
+# Force saving and rerun if states alter
 if not edited_inv_df.equals(st.session_state.inventory_data):
     st.session_state.inventory_data = edited_inv_df
     save_csv(edited_inv_df, INVENTORY_FILE)
@@ -109,13 +109,13 @@ if not edited_inv_df.equals(st.session_state.inventory_data):
 st.markdown("---")
 
 # ==========================================
-# PREVIOUS OPERATIONS SECTION: EXPENSES
+# SECTION 2: OPERATIONS & EXPENSES
 # ==========================================
 col_left, col_right = st.columns(2)
 
 with col_left:
     st.subheader("📋 Core Tracked Expenses")
-    st.caption("Double-click any cell in the 'Amount' column to update entries.")
+    st.caption("Modify amounts directly in the grid cell rows.")
     
     edited_left_df = st.data_editor(
         st.session_state.left_table_data,
@@ -144,8 +144,8 @@ with col_left:
     )
 
 with col_right:
-    st.subheader("📝 General / Miscellaneous Operations")
-    st.caption("A flexible scratchpad layout to list external or fluctuating daily costs.")
+    st.subheader("📝 Miscellaneous Expenses")
+    st.caption("Dynamic scratchpad area for changing operational costs.")
     
     if "right_table_data" not in st.session_state:
         st.session_state.right_table_data = pd.DataFrame(

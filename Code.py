@@ -14,7 +14,6 @@ EXPENSE_FILE = "expense_store.csv"
 INVENTORY_FILE = "inventory_store.csv"
 
 # --- INVENTORY TABLE SETUP ---
-# Removed the blank column from this list
 INV_COLUMNS = ["rassyoun", "kbir", "sghiir", "hout"]
 
 # 10 exact rows structured sequentially based on your input loop
@@ -32,9 +31,10 @@ INV_ROWS = [
 ]
 
 # --- EXPENSES SETUP ---
+# Added "tassliih" to the permanent list of tracked items
 FIXED_ITEMS = [
     "Frite", "Gazouz", "Fham", "Khobz", "Aymen", 
-    "Attar", "Khadema", "Khodhra", "mazraa", "karim"
+    "Attar", "Khadema", "Khodhra", "mazraa", "karim", "tassliih"
 ]
 
 # --- PERSISTENCE LAYER ---
@@ -42,16 +42,20 @@ def load_expense_data():
     if os.path.exists(EXPENSE_FILE):
         try:
             df = pd.read_csv(EXPENSE_FILE)
+            # Check if all FIXED_ITEMS are present; if not, re-align
             if "Expense Item" in df.columns and "Amount" in df.columns:
-                return df
+                # Merge to keep old values while adding new fixed rows safely
+                default_df = pd.DataFrame({"Expense Item": FIXED_ITEMS, "Amount": [0.0] * len(FIXED_ITEMS)})
+                merged = pd.merge(default_df, df, on="Expense Item", how="left", suffixes=("_def", ""))
+                merged["Amount"] = merged["Amount"].fillna(0.0)
+                return merged[["Expense Item", "Amount"]]
         except: pass
-    return pd.DataFrame({"Expense Item": FIXED_ITEMS, "Amount": [0.0] * 10})
+    return pd.DataFrame({"Expense Item": FIXED_ITEMS, "Amount": [0.0] * len(FIXED_ITEMS)})
 
 def load_inventory_data():
     if os.path.exists(INVENTORY_FILE):
         try:
             df = pd.read_csv(INVENTORY_FILE, index_col=0)
-            # Filter columns to ensure it strictly matches the 4 non-blank columns
             if len(df) == len(INV_ROWS):
                 return df.reindex(columns=INV_COLUMNS, fill_value=0.0)
         except: pass
@@ -146,25 +150,8 @@ with col_left:
     )
 
 with col_right:
-    st.subheader("📝 Miscellaneous Expenses")
-    st.caption("Dynamic scratchpad area for changing operational costs.")
+    st.subheader("📝 Fixed External Operations")
+    st.caption("Standard operational allowance metrics.")
     
-    if "right_table_data" not in st.session_state:
-        st.session_state.right_table_data = pd.DataFrame(
-            [
-                {"Category/Item": "Rent & Utilities", "Amount": 0.0, "Notes": ""},
-                {"Category/Item": "Equipment Repair", "Amount": 0.0, "Notes": ""},
-            ]
-        )
-        
-    edited_right_df = st.data_editor(
-        st.session_state.right_table_data,
-        use_container_width=True,
-        num_rows="dynamic",
-        hide_index=True,
-        key="right_editor"
-    )
-    st.session_state.right_table_data = edited_right_df
-    
-    right_total = edited_right_df["Amount"].sum() if not edited_right_df.empty else 0.0
-    st.metric(label="Other Operations Total", value=f"{right_total:,.3f} DT")
+    # Simple static metric card display replacing the entire second table setup
+    st.metric(label="Other Operations Total", value="60.000 DT")

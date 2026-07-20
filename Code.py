@@ -3,7 +3,7 @@ import pandas as pd
 import os
 
 # Set up page configuration
-st.set_page_config(page_title="Restaurant Manager", layout="wide", page_icon="🍽️")
+st.set_config = st.set_page_config(page_title="Restaurant Manager", layout="wide", page_icon="🍽️")
 
 st.title("🍽️ Restaurant Management Dashboard")
 st.markdown("---")
@@ -16,17 +16,16 @@ CASH_FILE = "cash_store.csv"
 # --- INVENTORY TABLE SETUP ---
 INV_COLUMNS = ["rassyoun", "kbir", "sghiir", "hout"]
 
-INV_ROWS = [
+# The 8 rows the user types into
+INPUT_ROWS = [
     "Beyet (1)",
     "Achat",
     "Vente (1)",
     "Reste (1)",
-    "Différence (1)",  # Formula 1
     "Reste (2)",
     "Plus",
     "Vente (2)",
-    "Beyet (2)",
-    "Différence (2)"   # Formula 2
+    "Beyet (2)"
 ]
 
 # --- EXPENSES SETUP ---
@@ -52,10 +51,10 @@ def load_inventory_data():
     if os.path.exists(INVENTORY_FILE):
         try:
             df = pd.read_csv(INVENTORY_FILE, index_col=0)
-            if len(df) == len(INV_ROWS):
+            if len(df) == len(INPUT_ROWS):
                 return df.reindex(columns=INV_COLUMNS, fill_value=0.0)
         except: pass
-    return pd.DataFrame(0.0, index=INV_ROWS, columns=INV_COLUMNS)
+    return pd.DataFrame(0.0, index=INPUT_ROWS, columns=INV_COLUMNS)
 
 def load_cash_left():
     if os.path.exists(CASH_FILE):
@@ -85,52 +84,61 @@ if "cash_left" not in st.session_state:
 # SECTION 1: HSEEB DJEJ (Stock Balance Ledger)
 # ==========================================
 st.subheader("📊 Hseeb Djej")
-st.caption("Enter inventory logs. The calculated difference rows are highlighted below.")
+st.caption("Enter your inventory logs below.")
 
-working_inv_df = st.session_state.inventory_data.copy()
-
-# Math execution loop with flipped formula signs
-for col in INV_COLUMNS:
-    try:
-        # Flipped Loop 1: Différence = Vente + Reste - Beyet - Achat
-        diff1 = (working_inv_df.at["Vente (1)", col] + 
-                 working_inv_df.at["Reste (1)", col] - 
-                 working_inv_df.at["Beyet (1)", col] - 
-                 working_inv_df.at["Achat", col])
-        working_inv_df.at["Différence (1)", col] = diff1
-        
-        # Flipped Loop 2: Différence = Vente + Beyet - Reste - Plus
-        diff2 = (working_inv_df.at["Vente (2)", col] + 
-                 working_inv_df.at["Beyet (2)", col] - 
-                 working_inv_df.at["Reste (2)", col] - 
-                 working_inv_df.at["Plus", col])
-        working_inv_df.at["Différence (2)", col] = diff2
-    except KeyError:
-        pass
-
-# Visual styling matrix for specific emphasis on calculated targets
-def highlight_differences(row):
-    if row.name in ["Différence (1)", "Différence (2)"]:
-        return ['background-color: #ffe0b2; font-weight: bold; color: #e65100; border: 2px solid #f57c00;'] * len(row)
-    return [''] * len(row)
-
-styled_inv_df = working_inv_df.style.apply(highlight_differences, axis=1)
-
-# Render editable grid
+# Render editable grid for raw inputs only (avoids the styling glitch entirely)
 edited_inv_df = st.data_editor(
-    styled_inv_df,
+    st.session_state.inventory_data,
     use_container_width=True,
-    disabled=["Différence (1)", "Différence (2)"],
     key="inventory_editor"
 )
 
-# Convert styled back to pure df for validation checks
-clean_edited_inv = pd.DataFrame(edited_inv_df.data, index=INV_ROWS, columns=INV_COLUMNS)
-
-if not clean_edited_inv.equals(st.session_state.inventory_data):
-    st.session_state.inventory_data = clean_edited_inv
-    save_csv(clean_edited_inv, INVENTORY_FILE)
+# Save inventory inputs if changed
+if not edited_inv_df.equals(st.session_state.inventory_data):
+    st.session_state.inventory_data = edited_inv_df
+    save_csv(edited_inv_df, INVENTORY_FILE)
     st.rerun()
+
+# --- CALCULATIONS & HIGH-VISIBILITY DISPLAY ---
+st.markdown("#### 🔍 Calculated Differences")
+
+# Calculate the results dynamically in the background
+diff1_results = {}
+diff2_results = {}
+
+for col in INV_COLUMNS:
+    # Flipped Loop 1: Différence = Vente + Reste - Beyet - Achat
+    diff1_results[col] = (edited_inv_df.at["Vente (1)", col] + 
+                          edited_inv_df.at["Reste (1)", col] - 
+                          edited_inv_df.at["Beyet (1)", col] - 
+                          edited_inv_df.at["Achat", col])
+    
+    # Flipped Loop 2: Différence = Vente + Beyet - Reste - Plus
+    diff2_results[col] = (edited_inv_df.at["Vente (2)", col] + 
+                          edited_inv_df.at["Beyet (2)", col] - 
+                          edited_inv_df.at["Reste (2)", col] - 
+                          edited_inv_df.at["Plus", col])
+
+# Display the calculated outputs using clean visual cards
+col1, col2, col3, col4 = st.columns(4)
+columns_mapped = [col1, col2, col3, col4]
+
+for index, name in enumerate(INV_COLUMNS):
+    with columns_mapped[index]:
+        st.markdown(f"**{name.upper()}**")
+        st.markdown(
+            f"""
+            <div style="background-color: #ffe0b2; padding: 8px; border-radius: 4px; border-left: 4px solid #f57c00; margin-bottom: 5px;">
+                <span style="font-size: 12px; color: #e65100; font-weight: bold;">Différence (1):</span><br>
+                <span style="font-size: 18px; color: #e65100; font-weight: bold;">{diff1_results[name]:,.2f}</span>
+            </div>
+            <div style="background-color: #fff3e0; padding: 8px; border-radius: 4px; border-left: 4px solid #ffb74d;">
+                <span style="font-size: 12px; color: #f57c00; font-weight: bold;">Différence (2):</span><br>
+                <span style="font-size: 18px; color: #f57c00; font-weight: bold;">{diff2_results[name]:,.2f}</span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
 st.markdown("---")
 
@@ -144,7 +152,7 @@ with col_left:
     st.caption("Modify amounts directly in the grid cell rows.")
     
     edited_left_df = st.data_editor(
-        st.session_state.left_table_data,
+        st.session_state.left_left_data if "left_left_data" in st.session_state else st.session_state.left_table_data,
         use_container_width=True,
         hide_index=True,
         disabled=["Expense Item"],
@@ -171,7 +179,7 @@ with col_left:
 
 with col_right:
     st.subheader("💰 Flouss")
-    st.caption("Input the remaining physical cash stack to evaluate total daily intake values.")
+    st.caption("Input the remaining physical cash stack.")
     
     cash_left_input = st.number_input(
         "Flouss (Money Left):", 
